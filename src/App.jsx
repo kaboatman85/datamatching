@@ -12,6 +12,9 @@ function App() {
   const [selectedTier, setSelectedTier] = useState(null);
 
   const [primaryKeyMap, setPrimaryKeyMap] = useState({});
+  // NEW: State to hold our custom field mappings across files
+  const [fieldMappings, setFieldMappings] = useState([]); 
+  
   const [selectedFieldValues, setSelectedFieldValues] = useState({});
   const [validatedRecords, setValidatedRecords] = useState([]);
   const [isValidatedOpen, setIsValidatedOpen] = useState(false);
@@ -21,8 +24,9 @@ function App() {
     setCurrentIdIndex(0);
     setSelectedFieldValues({});
     setSelectedTier(null);
-  }, [primaryKeyMap, fileData]);
+  }, [primaryKeyMap, fieldMappings, fileData]);
 
+  // The engine that groups records and re-writes the keys based on your mapping buckets
   const groupedRecords = useMemo(() => {
     if (Object.keys(primaryKeyMap).length === 0) return {};
     
@@ -34,12 +38,37 @@ function App() {
         const id = row[keyForThisFile];
         if (!id) return; 
         if (!acc[id]) acc[id] = [];
-        acc[id].push({ ...row, sourceFile: fileEntry.fileName });
+        
+        // Build a brand new record replacing old column names with the unified master names
+        const transformedRow = { sourceFile: fileEntry.fileName };
+
+        // 1. Apply user-defined field mappings
+        fieldMappings.forEach(mapping => {
+          const sourceCol = mapping.map[fileEntry.fileName];
+          // Ensure we don't accidentally map the primary key, and the value exists
+          if (sourceCol && sourceCol !== keyForThisFile && row[sourceCol] !== undefined) {
+            const mapName = mapping.name.trim() || `Mapped Field ${mapping.id}`;
+            transformedRow[mapName] = row[sourceCol];
+          }
+        });
+
+        // 2. Pass through the remaining unmapped fields
+        Object.keys(row).forEach(k => {
+          if (k === keyForThisFile) return; // The primary key is tracked automatically, don't duplicate it
+          const isMapped = fieldMappings.some(m => m.map[fileEntry.fileName] === k);
+          if (!isMapped) {
+            transformedRow[k] = row[k];
+          }
+        });
+
+        acc[id].push(transformedRow);
       });
       return acc;
     }, {});
-  }, [fileData, primaryKeyMap]);
+  }, [fileData, primaryKeyMap, fieldMappings]);
 
+  // Because the keys are unified in `groupedRecords`, the confidence calculator 
+  // automatically compares the mismatched columns accurately!
   const calculateConfidence = (group) => {
     if (group.length < 2) return 100;
     const allKeys = Array.from(new Set(group.flatMap(r => Object.keys(r).filter(k => k !== 'sourceFile'))));
@@ -146,13 +175,11 @@ function App() {
 
   const handleReviewToggle = () => {
     const isCurrentlyReviewed = reviewedIds.has(currentId);
-    
     setReviewedIds(prev => {
       const next = new Set(prev);
       isCurrentlyReviewed ? next.delete(currentId) : next.add(currentId);
       return next;
     });
-
     if (!isCurrentlyReviewed && currentIdIndex < allIds.length - 1) {
       setCurrentIdIndex(i => i + 1);
     }
@@ -183,11 +210,17 @@ function App() {
 
   const removeFile = (fileName) => {
     setFileData(prev => prev.filter(x => x.fileName !== fileName));
+    // Clean up mapping arrays to prevent ghost data
     setPrimaryKeyMap(prev => {
       const next = { ...prev };
       delete next[fileName];
       return next;
     });
+    setFieldMappings(prev => prev.map(m => {
+      const nextMap = { ...m.map };
+      delete nextMap[fileName];
+      return { ...m, map: nextMap };
+    }));
   };
 
   const validatedTableKeys = Array.from(new Set(validatedRecords.flatMap(Object.keys)));
@@ -212,30 +245,37 @@ function App() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {fileData.map(f => {
                   const headers = f.data.length > 0 ? Object.keys(f.data[0]) : [];
-                  const isMapped = primaryKeyMap[f.fileName];
+                  const isPrimaryMapped = primaryKeyMap[f.fileName];
                   return (
-                    <div key={f.fileName} className={`border p-4 rounded-lg shadow-sm transition-colors ${isMapped ? 'border-green-300 bg-green-50' : 'border-gray-200 bg-gray-50'}`}>
+                    <div key={f.fileName} className={`border p-4 rounded-lg shadow-sm transition-colors ${isPrimaryMapped ? 'border-green-300 bg-green-50' : 'border-gray-200 bg-gray-50'}`}>
                       <div className="flex justify-between items-center mb-3 border-b pb-2">
                         <h4 className="font-bold text-sm text-gray-800 truncate pr-2" title={f.fileName}>
-                          {isMapped && <span className="text-green-600 mr-2">✓</span>}
+                          {isPrimaryMapped && <span className="text-green-600 mr-2">✓</span>}
                           {f.fileName}
                         </h4>
                         <button onClick={() => removeFile(f.fileName)} className="text-red-500 hover:text-red-700 text-xs font-bold px-2 py-1 bg-red-100 rounded">Remove</button>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {headers.map(header => (
-                          <div 
-                            key={header}
-                            draggable
-                            onDragStart={(e) => e.dataTransfer.setData('text/plain', JSON.stringify({ fileName: f.fileName, header }))}
-                            className={`text-xs px-2 py-1 rounded shadow-sm cursor-grab active:cursor-grabbing transition-colors
-                              ${primaryKeyMap[f.fileName] === header ? 'bg-green-600 text-white border border-green-700' : 'bg-white border border-blue-200 text-blue-700 hover:bg-blue-50'}
-                            `}
-                            title="Drag me to the bucket"
-                          >
-                            {header}
-                          </div>
-                        ))}
+                        {headers.map(header => {
+                          const isPrimary = primaryKeyMap[f.fileName] === header;
+                          const isFieldMapped = fieldMappings.some(m => m.map[f.fileName] === header);
+                          
+                          let pillStyles = 'bg-white border-blue-200 text-blue-700 hover:bg-blue-50'; // default
+                          if (isPrimary) pillStyles = 'bg-green-600 border-green-700 text-white';
+                          else if (isFieldMapped) pillStyles = 'bg-blue-500 border-blue-600 text-white';
+
+                          return (
+                            <div 
+                              key={header}
+                              draggable
+                              onDragStart={(e) => e.dataTransfer.setData('text/plain', JSON.stringify({ fileName: f.fileName, header }))}
+                              className={`text-xs px-2 py-1 border rounded shadow-sm cursor-grab active:cursor-grabbing transition-colors ${pillStyles}`}
+                              title="Drag me to a bucket"
+                            >
+                              {header}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   );
@@ -244,47 +284,107 @@ function App() {
             )}
 
             {fileData.length > 0 && (
-              <div 
-                onDragEnter={(e) => e.preventDefault()}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  try {
-                    const data = e.dataTransfer.getData('text/plain');
-                    if (data) {
-                      const { fileName, header } = JSON.parse(data);
-                      setPrimaryKeyMap(prev => ({ ...prev, [fileName]: header }));
-                    }
-                  } catch (err) {
-                    console.error("Drop parsing error:", err);
-                  }
-                }}
-                className={`mt-4 p-6 border-2 border-dashed rounded-lg text-center transition-all ${isFullyMapped ? 'border-green-500 bg-green-50 shadow-inner' : 'border-blue-400 bg-blue-50'}`}
-              >
-                {Object.keys(primaryKeyMap).length > 0 ? (
-                  <div className="flex flex-col items-center gap-2">
-                    <span className="text-gray-600 font-medium">Reconciling records linked by:</span>
-                    <div className="flex flex-wrap justify-center gap-3 mt-2">
-                      {Object.entries(primaryKeyMap).map(([fName, col]) => (
-                        <span key={fName} className="font-bold text-sm text-green-800 bg-green-200 px-3 py-1 rounded shadow-sm">
-                          {fName}: <span className="text-green-900 underline">{col}</span>
-                        </span>
-                      ))}
+              <div className="mt-8 border-t pt-6">
+                <h3 className="font-bold text-gray-800 mb-4 text-lg">Linking Rules</h3>
+                
+                <div 
+                  onDragEnter={(e) => e.preventDefault()}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    try {
+                      const data = e.dataTransfer.getData('text/plain');
+                      if (data) {
+                        const { fileName, header } = JSON.parse(data);
+                        setPrimaryKeyMap(prev => ({ ...prev, [fileName]: header }));
+                      }
+                    } catch (err) {}
+                  }}
+                  className={`p-6 border-2 border-dashed rounded-lg text-center transition-all ${isFullyMapped ? 'border-green-500 bg-green-50 shadow-inner' : 'border-blue-400 bg-blue-50'}`}
+                >
+                  {Object.keys(primaryKeyMap).length > 0 ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <span className="text-gray-600 font-medium">Primary Record Link:</span>
+                      <div className="flex flex-wrap justify-center gap-3 mt-2">
+                        {Object.entries(primaryKeyMap).map(([fName, col]) => (
+                          <span key={fName} className="font-bold text-sm text-green-800 bg-green-200 px-3 py-1 rounded shadow-sm">
+                            {fName}: <span className="text-green-900 underline">{col}</span>
+                          </span>
+                        ))}
+                      </div>
+                      <button onClick={() => setPrimaryKeyMap({})} className="mt-2 text-sm text-red-500 hover:text-red-700 underline font-medium">Clear Link</button>
                     </div>
-                    <button onClick={() => setPrimaryKeyMap({})} className="mt-2 text-sm text-red-500 hover:text-red-700 underline font-medium">Clear Configuration</button>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center gap-2">
-                    <svg className="w-8 h-8 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
-                    <p className="text-blue-800 font-bold text-lg">Cross-File Link Bucket</p>
-                    <p className="text-blue-600 text-sm">Drag one column from <b>each</b> file above and drop it here to link them together.</p>
+                  ) : (
+                    <div className="flex flex-col items-center gap-2">
+                      <p className="text-blue-800 font-bold text-lg">Primary Key Bucket (Required)</p>
+                      <p className="text-blue-600 text-sm">Drag one column from <b>each</b> file to define what connects the records (e.g. Taxpayer ID).</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* NEW: Dynamic Secondary Column Mappings */}
+                {isFullyMapped && (
+                  <div className="mt-6">
+                    <div className="flex justify-between items-center mb-4">
+                      <h4 className="font-bold text-gray-700">Unified Columns (Optional)</h4>
+                      <button 
+                        onClick={() => setFieldMappings(prev => [...prev, { id: Date.now(), name: '', map: {} }])} 
+                        className="bg-blue-100 hover:bg-blue-200 text-blue-700 font-bold py-1 px-3 rounded text-sm transition-colors"
+                      >
+                        + Add Column Mapping
+                      </button>
+                    </div>
+                    
+                    {fieldMappings.length > 0 && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {fieldMappings.map(mapping => (
+                          <div 
+                            key={mapping.id}
+                            onDragEnter={(e) => e.preventDefault()}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              try {
+                                const data = e.dataTransfer.getData('text/plain');
+                                if (data) {
+                                  const { fileName, header } = JSON.parse(data);
+                                  setFieldMappings(prev => prev.map(m => m.id === mapping.id ? { ...m, map: { ...m.map, [fileName]: header } } : m));
+                                }
+                              } catch (err) {}
+                            }}
+                            className="p-4 border-2 border-dashed border-gray-300 rounded bg-white shadow-sm"
+                          >
+                            <div className="flex justify-between items-center mb-3">
+                              <input 
+                                type="text" 
+                                value={mapping.name}
+                                onChange={(e) => setFieldMappings(prev => prev.map(m => m.id === mapping.id ? { ...m, name: e.target.value } : m))}
+                                placeholder="Master Column Name..."
+                                className="font-bold text-gray-800 border-b border-dashed border-gray-400 focus:outline-none focus:border-blue-500 px-1 w-2/3"
+                              />
+                              <button onClick={() => setFieldMappings(prev => prev.filter(m => m.id !== mapping.id))} className="text-red-400 hover:text-red-600 font-bold text-lg">&times;</button>
+                            </div>
+                            
+                            <div className="flex flex-wrap gap-2 min-h-[32px] items-center bg-gray-50 p-2 rounded">
+                              {Object.keys(mapping.map).length === 0 && <span className="text-sm text-gray-400 italic">Drag equivalent columns here...</span>}
+                              {Object.entries(mapping.map).map(([fName, col]) => (
+                                <span key={fName} className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded flex items-center gap-1 shadow-sm border border-blue-200">
+                                  <span className="font-semibold truncate max-w-[80px]" title={fName}>{fName.substring(0,6)}..</span>: {col}
+                                  <button onClick={() => setFieldMappings(prev => prev.map(m => { if(m.id !== mapping.id) return m; const newMap = {...m.map}; delete newMap[fName]; return {...m, map: newMap}; }))} className="ml-1 text-blue-500 hover:text-blue-900 leading-none">&times;</button>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
             )}
             
             {isFullyMapped && (
-               <label className="flex items-center mt-4 text-sm font-medium text-gray-700 bg-gray-50 p-3 rounded border w-fit">
+               <label className="flex items-center mt-6 text-sm font-medium text-gray-700 bg-gray-50 p-3 rounded border w-fit shadow-sm">
                  <input type="checkbox" checked={showOnlyMatches} onChange={() => setShowOnlyMatches(!showOnlyMatches)} className="mr-2 w-4 h-4 text-blue-600"/> 
                  Only show records appearing in multiple files
                </label>
@@ -434,7 +534,11 @@ function App() {
                     <div key={idx} className="border border-gray-200 p-4 rounded shadow-sm bg-white">
                       <h4 className="font-semibold mb-3 text-sm text-gray-700 border-b pb-2">Source: {record.sourceFile}</h4>
                       <div className="flex flex-col gap-1">
-                        {Object.entries(record).filter(([k]) => k !== 'sourceFile' && k !== primaryKeyMap[record.sourceFile]).map(([key, val]) => {
+                        {/* 
+                          The keys have already been cleaned by our mapping engine above! 
+                          We just render them directly.
+                        */}
+                        {Object.entries(record).filter(([k]) => k !== 'sourceFile').map(([key, val]) => {
                           const isConflict = currentGroup.some(otherRec => otherRec[key] !== undefined && otherRec[key] !== val);
                           return (
                             <label 
