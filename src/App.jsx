@@ -238,7 +238,7 @@ function App() {
                             key={header}
                             draggable
                             // Pass both the file name and the header to the dropzone
-                            onDragStart={(e) => e.dataTransfer.setData('application/json', JSON.stringify({ fileName: f.fileName, header }))}
+                            onDragStart={(e) => e.dataTransfer.setData('text/plain', JSON.stringify({ fileName: f.fileName, header }))}
                             className={`text-xs px-2 py-1 rounded shadow-sm cursor-grab active:cursor-grabbing transition-colors
                               ${primaryKeyMap[f.fileName] === header ? 'bg-green-600 text-white border border-green-700' : 'bg-white border border-blue-200 text-blue-700 hover:bg-blue-50'}
                             `}
