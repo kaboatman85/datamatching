@@ -11,13 +11,11 @@ function App() {
   const [showOnlyMatches, setShowOnlyMatches] = useState(true);
   const [selectedTier, setSelectedTier] = useState(null);
 
-  // UPDATED: Now an object to hold multiple mappings { "fileName": "columnName" }
   const [primaryKeyMap, setPrimaryKeyMap] = useState({});
   const [selectedFieldValues, setSelectedFieldValues] = useState({});
   const [validatedRecords, setValidatedRecords] = useState([]);
   const [isValidatedOpen, setIsValidatedOpen] = useState(false);
 
-  // Reset progress if the user changes the mapping or adds/removes files
   useEffect(() => {
     setReviewedIds(new Set());
     setCurrentIdIndex(0);
@@ -26,11 +24,9 @@ function App() {
   }, [primaryKeyMap, fileData]);
 
   const groupedRecords = useMemo(() => {
-    // Only group if we have mapped columns
     if (Object.keys(primaryKeyMap).length === 0) return {};
     
     return fileData.reduce((acc, fileEntry) => {
-      // Look up the specific column name assigned to this file
       const keyForThisFile = primaryKeyMap[fileEntry.fileName];
       if (!keyForThisFile) return acc; 
 
@@ -163,7 +159,6 @@ function App() {
   };
 
   const handleSaveRecord = () => {
-    // Pick the first mapped key to act as the column header in our master output
     const masterKeyName = Object.values(primaryKeyMap)[0] || "Master ID";
     const newRecord = { [masterKeyName]: currentId, ...selectedFieldValues };
     
@@ -186,7 +181,6 @@ function App() {
     }
   };
 
-  // Helper to remove a file and clean up its mapping
   const removeFile = (fileName) => {
     setFileData(prev => prev.filter(x => x.fileName !== fileName));
     setPrimaryKeyMap(prev => {
@@ -197,13 +191,10 @@ function App() {
   };
 
   const validatedTableKeys = Array.from(new Set(validatedRecords.flatMap(Object.keys)));
-  
-  // Logic Gate check: Make sure every uploaded file has a mapping in the bucket
   const isFullyMapped = fileData.length > 0 && Object.keys(primaryKeyMap).length === fileData.length;
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-100 p-4 gap-4">
-      {/* File Upload & Mapping Section */}
       <section className="bg-white rounded-lg shadow p-6 border-t-4 border-blue-500">
         <button onClick={() => setIsFilesOpen(!isFilesOpen)} className="w-full flex justify-between items-center font-bold text-lg mb-4">
           <span>Data Ingestion & Mapping</span>
@@ -217,7 +208,6 @@ function App() {
               <p className="text-gray-600 font-medium text-lg">Drag 'n' drop CSV files here, or click to browse</p>
             </div>
 
-            {/* Render File Cards with Column Pills */}
             {fileData.length > 0 && (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {fileData.map(f => {
@@ -237,7 +227,6 @@ function App() {
                           <div 
                             key={header}
                             draggable
-                            // Pass both the file name and the header to the dropzone
                             onDragStart={(e) => e.dataTransfer.setData('text/plain', JSON.stringify({ fileName: f.fileName, header }))}
                             className={`text-xs px-2 py-1 rounded shadow-sm cursor-grab active:cursor-grabbing transition-colors
                               ${primaryKeyMap[f.fileName] === header ? 'bg-green-600 text-white border border-green-700' : 'bg-white border border-blue-200 text-blue-700 hover:bg-blue-50'}
@@ -254,20 +243,20 @@ function App() {
               </div>
             )}
 
-            {/* The Grouping Bucket */}
             {fileData.length > 0 && (
               <div 
+                onDragEnter={(e) => e.preventDefault()}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => {
                   e.preventDefault();
                   try {
-                    const data = e.dataTransfer.getData('application/json');
+                    const data = e.dataTransfer.getData('text/plain');
                     if (data) {
                       const { fileName, header } = JSON.parse(data);
                       setPrimaryKeyMap(prev => ({ ...prev, [fileName]: header }));
                     }
                   } catch (err) {
-                    // Ignore non-json drops
+                    console.error("Drop parsing error:", err);
                   }
                 }}
                 className={`mt-4 p-6 border-2 border-dashed rounded-lg text-center transition-all ${isFullyMapped ? 'border-green-500 bg-green-50 shadow-inner' : 'border-blue-400 bg-blue-50'}`}
@@ -304,7 +293,6 @@ function App() {
         )}
       </section>
 
-      {/* Logic Gate: Only render if every file has a mapped primary key */}
       {isFullyMapped ? (
         <>
           <section className="bg-white rounded-lg shadow border border-gray-200 p-6">
@@ -446,7 +434,6 @@ function App() {
                     <div key={idx} className="border border-gray-200 p-4 rounded shadow-sm bg-white">
                       <h4 className="font-semibold mb-3 text-sm text-gray-700 border-b pb-2">Source: {record.sourceFile}</h4>
                       <div className="flex flex-col gap-1">
-                        {/* Filter out the specific ID column mapped to this specific file so it isn't listed as a selectable field */}
                         {Object.entries(record).filter(([k]) => k !== 'sourceFile' && k !== primaryKeyMap[record.sourceFile]).map(([key, val]) => {
                           const isConflict = currentGroup.some(otherRec => otherRec[key] !== undefined && otherRec[key] !== val);
                           return (
