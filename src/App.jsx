@@ -12,7 +12,6 @@ function App() {
   const [selectedTier, setSelectedTier] = useState(null);
 
   const [primaryKeyMap, setPrimaryKeyMap] = useState({});
-  // NEW: State to hold our custom field mappings across files
   const [fieldMappings, setFieldMappings] = useState([]); 
   
   const [selectedFieldValues, setSelectedFieldValues] = useState({});
@@ -26,7 +25,6 @@ function App() {
     setSelectedTier(null);
   }, [primaryKeyMap, fieldMappings, fileData]);
 
-  // The engine that groups records and re-writes the keys based on your mapping buckets
   const groupedRecords = useMemo(() => {
     if (Object.keys(primaryKeyMap).length === 0) return {};
     
@@ -39,22 +37,18 @@ function App() {
         if (!id) return; 
         if (!acc[id]) acc[id] = [];
         
-        // Build a brand new record replacing old column names with the unified master names
         const transformedRow = { sourceFile: fileEntry.fileName };
 
-        // 1. Apply user-defined field mappings
         fieldMappings.forEach(mapping => {
           const sourceCol = mapping.map[fileEntry.fileName];
-          // Ensure we don't accidentally map the primary key, and the value exists
           if (sourceCol && sourceCol !== keyForThisFile && row[sourceCol] !== undefined) {
             const mapName = mapping.name.trim() || `Mapped Field ${mapping.id}`;
             transformedRow[mapName] = row[sourceCol];
           }
         });
 
-        // 2. Pass through the remaining unmapped fields
         Object.keys(row).forEach(k => {
-          if (k === keyForThisFile) return; // The primary key is tracked automatically, don't duplicate it
+          if (k === keyForThisFile) return; 
           const isMapped = fieldMappings.some(m => m.map[fileEntry.fileName] === k);
           if (!isMapped) {
             transformedRow[k] = row[k];
@@ -67,8 +61,6 @@ function App() {
     }, {});
   }, [fileData, primaryKeyMap, fieldMappings]);
 
-  // Because the keys are unified in `groupedRecords`, the confidence calculator 
-  // automatically compares the mismatched columns accurately!
   const calculateConfidence = (group) => {
     if (group.length < 2) return 100;
     const allKeys = Array.from(new Set(group.flatMap(r => Object.keys(r).filter(k => k !== 'sourceFile'))));
@@ -210,7 +202,6 @@ function App() {
 
   const removeFile = (fileName) => {
     setFileData(prev => prev.filter(x => x.fileName !== fileName));
-    // Clean up mapping arrays to prevent ghost data
     setPrimaryKeyMap(prev => {
       const next = { ...prev };
       delete next[fileName];
@@ -260,7 +251,7 @@ function App() {
                           const isPrimary = primaryKeyMap[f.fileName] === header;
                           const isFieldMapped = fieldMappings.some(m => m.map[f.fileName] === header);
                           
-                          let pillStyles = 'bg-white border-blue-200 text-blue-700 hover:bg-blue-50'; // default
+                          let pillStyles = 'bg-white border-blue-200 text-blue-700 hover:bg-blue-50'; 
                           if (isPrimary) pillStyles = 'bg-green-600 border-green-700 text-white';
                           else if (isFieldMapped) pillStyles = 'bg-blue-500 border-blue-600 text-white';
 
@@ -322,7 +313,6 @@ function App() {
                   )}
                 </div>
 
-                {/* NEW: Dynamic Secondary Column Mappings */}
                 {isFullyMapped && (
                   <div className="mt-6">
                     <div className="flex justify-between items-center mb-4">
@@ -534,10 +524,6 @@ function App() {
                     <div key={idx} className="border border-gray-200 p-4 rounded shadow-sm bg-white">
                       <h4 className="font-semibold mb-3 text-sm text-gray-700 border-b pb-2">Source: {record.sourceFile}</h4>
                       <div className="flex flex-col gap-1">
-                        {/* 
-                          The keys have already been cleaned by our mapping engine above! 
-                          We just render them directly.
-                        */}
                         {Object.entries(record).filter(([k]) => k !== 'sourceFile').map(([key, val]) => {
                           const isConflict = currentGroup.some(otherRec => otherRec[key] !== undefined && otherRec[key] !== val);
                           return (
