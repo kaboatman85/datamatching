@@ -1,13 +1,16 @@
 {
-  "name": "vite-react-starter",
+"name": "datamatching",
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "homepage": "https://github.com/kaboatman85/datamatching",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "lint": "oxlint",
-    "preview": "vite preview"
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d dist"
   },
   "dependencies": {
     "papaparse": "^5.5.4",
