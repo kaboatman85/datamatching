@@ -18,6 +18,37 @@ function App() {
   const [validatedRecords, setValidatedRecords] = useState([]);
   const [isValidatedOpen, setIsValidatedOpen] = useState(false);
 
+  // --- NEW: Field Visibility State ---
+  const [visibleFields, setVisibleFields] = useState([]);
+
+  // --- NEW: Calculate all available fields across all uploaded files ---
+  const allAvailableFields = useMemo(() => {
+    const fields = new Set();
+    fileData.forEach(file => {
+      if (file.data && file.data.length > 0) {
+        Object.keys(file.data[0]).forEach(k => fields.add(k));
+      }
+    });
+    return Array.from(fields);
+  }, [fileData]);
+
+  // --- NEW: Automatically select all fields when new files are uploaded ---
+  useEffect(() => {
+    setVisibleFields(allAvailableFields);
+  }, [fileData.length]); 
+
+  // --- NEW: Toggle Field Functions ---
+  const toggleField = (fieldToToggle) => {
+    if (visibleFields.includes(fieldToToggle)) {
+      setVisibleFields(visibleFields.filter(f => f !== fieldToToggle));
+    } else {
+      setVisibleFields([...visibleFields, fieldToToggle]);
+    }
+  };
+  const selectAllFields = () => setVisibleFields(allAvailableFields);
+  const deselectAllFields = () => setVisibleFields([]);
+
+
   useEffect(() => {
     setReviewedIds(new Set());
     setCurrentIdIndex(0);
@@ -214,7 +245,9 @@ function App() {
     }));
   };
 
-  const validatedTableKeys = Array.from(new Set(validatedRecords.flatMap(Object.keys)));
+  const validatedTableKeys = Array.from(new Set(validatedRecords.flatMap(Object.keys)))
+    .filter(k => visibleFields.includes(k) || Object.values(primaryKeyMap).includes(k));
+  
   const isFullyMapped = fileData.length > 0 && Object.keys(primaryKeyMap).length === fileData.length;
 
   return (
@@ -236,6 +269,7 @@ function App() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {fileData.map(f => {
                   const headers = f.data.length > 0 ? Object.keys(f.data[0]) : [];
+                  const visibleHeaders = headers.filter(h => visibleFields.includes(h)); // Filtered fields
                   const isPrimaryMapped = primaryKeyMap[f.fileName];
                   return (
                     <div key={f.fileName} className={`border p-4 rounded-lg shadow-sm transition-colors ${isPrimaryMapped ? 'border-green-300 bg-green-50' : 'border-gray-200 bg-gray-50'}`}>
@@ -246,8 +280,8 @@ function App() {
                         </h4>
                         <button onClick={() => removeFile(f.fileName)} className="text-red-500 hover:text-red-700 text-xs font-bold px-2 py-1 bg-red-100 rounded">Remove</button>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        {headers.map(header => {
+                      <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto">
+                        {visibleHeaders.map(header => {
                           const isPrimary = primaryKeyMap[f.fileName] === header;
                           const isFieldMapped = fieldMappings.some(m => m.map[f.fileName] === header);
                           
@@ -271,6 +305,46 @@ function App() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {/* --- NEW: Field Filter UI Block --- */}
+            {fileData.length > 0 && (
+              <div className="mt-8 border-t pt-6">
+                <h3 className="font-bold text-gray-800 mb-4 text-lg">Filter Unnecessary Fields</h3>
+                <div className="mb-6 p-4 border border-gray-200 rounded-lg shadow-sm bg-gray-50">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold text-gray-700">Select Fields to Display:</h3>
+                    <div className="space-x-3">
+                      <button 
+                        onClick={selectAllFields}
+                        className="px-3 py-1 text-sm bg-blue-100 text-blue-700 font-medium rounded hover:bg-blue-200 transition-colors"
+                      >
+                        Select All
+                      </button>
+                      <button 
+                        onClick={deselectAllFields}
+                        className="px-3 py-1 text-sm bg-gray-200 text-gray-700 font-medium rounded hover:bg-gray-300 transition-colors"
+                      >
+                        Deselect All
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-4 max-h-40 overflow-y-auto p-2 border bg-white rounded">
+                    {allAvailableFields.map((field) => (
+                      <label key={field} className="flex items-center space-x-2 cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={visibleFields.includes(field)}
+                          onChange={() => toggleField(field)}
+                          className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm font-medium text-gray-600">{field}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -524,7 +598,8 @@ function App() {
                     <div key={idx} className="border border-gray-200 p-4 rounded shadow-sm bg-white">
                       <h4 className="font-semibold mb-3 text-sm text-gray-700 border-b pb-2">Source: {record.sourceFile}</h4>
                       <div className="flex flex-col gap-1">
-                        {Object.entries(record).filter(([k]) => k !== 'sourceFile').map(([key, val]) => {
+                        {/* --- NEW: Added visibleFields.includes(k) filter here so unchecked fields don't render --- */}
+                        {Object.entries(record).filter(([k]) => k !== 'sourceFile' && visibleFields.includes(k)).map(([key, val]) => {
                           const isConflict = currentGroup.some(otherRec => otherRec[key] !== undefined && otherRec[key] !== val);
                           return (
                             <label 
